@@ -10,7 +10,7 @@ from datetime import datetime
 # =========================
 
 model = YOLO(
-    r"C:\Users\Admin\OneDrive\Desktop\du an rung\runs\classify\train\weights\best.pt"
+    r"./runs/classify/train/weights/best.pt"
 )
 
 # =========================
@@ -71,7 +71,7 @@ while True:
     frame_count += 1
 
     # =========================
-    # YOLO (mỗi 10 frame)
+    # YOLO (mỗi 10 frame/each 10 frames)
     # =========================
 
     if frame_count % 10 == 0:
@@ -100,7 +100,7 @@ while True:
             print("YOLO ERROR:", e)
 
     # =========================
-    # OCR (mỗi 30 frame)
+    # OCR (mỗi 30 frame/each 30 frames)
     # =========================
 
     if frame_count % 30 == 0:
