@@ -19,7 +19,7 @@ SCRCPY_TITLE = "camcamcam_forest-clc"
 scrcpy_process = subprocess.Popen([
     "scrcpy",
     # "-d", # auto-select connected via usb
-    "--tcpip=+192.168.137.226:37391", # specify ip:port (different each time)
+    "--tcpip=+192.168.137.226:36803", # specify ip:port (different each time)
     # "--tcpip", # auto-select port
     # "-e", # auto-select connected via wifi (tcp/ip)
     # "-s mf8xbyuo8tgqtcba", # device serial

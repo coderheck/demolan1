@@ -219,3 +219,5 @@ __marimo__/
 
 *.cache
 forest_log.csv
+runs/classify/train/*.jpg
+runs/classify/train/*.png
