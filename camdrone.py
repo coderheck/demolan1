@@ -18,7 +18,11 @@ import os
 SCRCPY_TITLE = "camcamcam_forest-clc"
 scrcpy_process = subprocess.Popen([
     "scrcpy",
-    "-d",
+    # "-d", # auto-select connected via usb
+    "--tcpip=+192.168.137.226:37391", # specify ip:port (different each time)
+    # "--tcpip", # auto-select port
+    # "-e", # auto-select connected via wifi (tcp/ip)
+    # "-s mf8xbyuo8tgqtcba", # device serial
     "--video-codec=h264",
     "--max-size=1600",
     "--max-fps=60",

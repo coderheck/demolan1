@@ -5,7 +5,7 @@ model = YOLO("yolov8n-cls.pt")
 
 # Train AI
 model.train(
-    # ----- param -----
+    # ----- parameter -----
     data = "forest_dataset",
     epochs = 100,
     imgsz = 384,
