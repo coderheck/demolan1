@@ -217,6 +217,8 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+*.cache
+forest_dataset/*.cache
 forest_log.csv
 runs/classify/train/*.jpg
 runs/classify/train/*.png
