@@ -1,6 +1,6 @@
 task: classify
 mode: train
-model: yolov8n-cls.pt
+model: yolo26n-cls.pt
 data: forest_dataset
 epochs: 100
 time: null
