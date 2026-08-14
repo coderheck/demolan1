@@ -17,7 +17,7 @@ model = YOLO(
 # OCR
 # =========================
 
-reader = easyocr.Reader(['en'], gpu=False)
+reader = easyocr.Reader(['en'], gpu=True)
 
 # =========================
 # CAMERA OBS
@@ -77,26 +77,17 @@ while True:
     if frame_count % 10 == 0:
 
         try:
-
-            small = cv2.resize(frame, (224, 224))
-
+            # small = cv2.resize(frame, (224, 224))
             results = model(
-                small,
+                # small, 
+                frame, 
                 verbose=False
             )
-
             probs = results[0].probs
-
             class_id = probs.top1
-
-            conf = float(
-                probs.top1conf
-            )
-
+            conf = float(probs.top1conf)
             forest_class = model.names[class_id]
-
         except Exception as e:
-
             print("YOLO ERROR:", e)
 
     # =========================

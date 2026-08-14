@@ -1,3 +1,5 @@
+# ===== test scrcpy =====
+
 import cv2
 import numpy as np
 import mss
@@ -16,7 +18,7 @@ scrcpy_process = subprocess.Popen([
     "--no-audio",
     "-d",
     "--always-on-top",
-    "--window-title=camcamcam",
+    "--window-title=camcamcam_forest-clc",
     "--window-borderless",
 ])
 time.sleep(3)  # Wait for the window to open
@@ -24,7 +26,7 @@ print("waiting 3secs...")
 
 # 2. Locate the window
 try:
-    win = gw.getWindowsWithTitle("camcamcam")[0]
+    win = gw.getWindowsWithTitle("camcamcam_forest-clc")[0]
     print("found scrcpy window:")
     win.activate()
 except IndexError:

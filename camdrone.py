@@ -1,3 +1,5 @@
+# ===== script dùng scrcpy =====
+
 import cv2
 import numpy as np
 import mss
@@ -13,7 +15,7 @@ import os
 # SCRCPY
 # ============================================================
 
-SCRCPY_TITLE = "camcamcam"
+SCRCPY_TITLE = "camcamcam_forest-clc"
 scrcpy_process = subprocess.Popen([
     "scrcpy",
     "-d",
@@ -43,7 +45,7 @@ try:
     print("Found scrcpy window:")
     print(f"Position: {win.left}, {win.top}")
     print(f"Size: {win.width} x {win.height}")
-    win.activate()
+    # win.activate()
 
 except IndexError:
     print("Could not find scrcpy window.")
@@ -162,8 +164,8 @@ with mss.MSS() as sct:
         # Capture scrcpy
         # ----------------------------------------------------
 
-        img = np.array(sct.grab(monitor))
-        frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        frame = np.array(sct.grab(monitor))
+        # processed = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
 
         # ----------------------------------------------------
         # Frame counter
@@ -184,7 +186,11 @@ with mss.MSS() as sct:
 
         if frame_count % 10 == 0:
             try:
-                results = model(frame, verbose=False)
+                results = model(
+                    # processed, 
+                    frame,
+                    verbose=False
+                )
                 probs = results[0].probs
                 class_id = probs.top1
                 conf = float(probs.top1conf)
