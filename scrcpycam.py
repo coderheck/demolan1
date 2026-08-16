@@ -7,11 +7,11 @@ import pygetwindow as gw
 import time
 import subprocess
 
-# 1. Start scrcpy automatically (ensure it's in your system PATH)
-# [--window-title=camcamcam] gives it a predictable name to grab
+# 1. Start scrcpy automatically
+# [--window-title=camcamcam_forest-clc] gives the opened window a predictable name
 # arglist: [--video-codec=h264 --max-size=1600 --max-fps=60 --no-audio -d --windows-borderless --always-on-top]
 scrcpy_process = subprocess.Popen([
-    "scrcpy",
+    "./scrcpy/scrcpy",
     "--video-codec=h264",
     "--max-size=1600",
     "--max-fps=60",

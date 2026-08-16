@@ -16,7 +16,7 @@ while True:
         break
 
     # Predict
-    results = model(frame)
+    results = model(frame, verbose = False)
 
     # Get class
     probs = results[0].probs
