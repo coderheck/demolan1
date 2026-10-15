@@ -8,6 +8,11 @@ from typing import Literal
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+import folium
+from folium.plugins import HeatMap
+from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
+
 DB_FILE = "forest.db"
 API_KEY = os.environ.get("FOREST_API_KEY")
 
@@ -120,3 +125,180 @@ def list_records(
 
     return [dict(row) for row in rows]
 
+@app.post("/api/annotate-latest")
+def annotate_latest(
+    device_id: str,
+    density: str,
+    confidence: float,
+    telemetry: str | None = None,
+    x_api_key: str | None = Header(default=None),
+):
+    check_key(x_api_key)
+
+    if density not in {"dense", "medium", "sparse", "unknown"}:
+        raise HTTPException(status_code=400, detail="Invalid forest type")
+
+    if not 0 <= confidence <= 1:
+        raise HTTPException(status_code=400, detail="Invalid confidence")
+
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.execute("""
+            UPDATE records
+            SET density = ?, confidence = ?, telemetry = ?
+            WHERE id = (
+                SELECT id FROM records
+                WHERE device_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+            )
+        """, (density, confidence, telemetry, device_id))
+
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="No GPS record found")
+
+    return {"status": "annotated"}
+
+@app.get("/heatmap")
+def forest_heatmap(
+    forest_type: str = "all",
+    start: str | None = None,
+    end: str | None = None,
+):
+    allowed_types = {"dense", "medium", "sparse", "unknown", "all"}
+    if forest_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Invalid forest_type")
+
+    query = """
+        SELECT id, received_at, recorded_at, device_id,
+               latitude, longitude, density, confidence, telemetry
+        FROM records
+        WHERE latitude IS NOT NULL
+          AND longitude IS NOT NULL
+    """
+    params = []
+
+    if forest_type != "all":
+        query += " AND density = ?"
+        params.append(forest_type)
+
+    if start:
+        query += " AND COALESCE(recorded_at, received_at) >= ?"
+        params.append(start)
+
+    if end:
+        query += " AND COALESCE(recorded_at, received_at) <= ?"
+        params.append(end)
+
+    query += " ORDER BY id ASC"
+
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(query, params).fetchall()
+
+    if not rows:
+        return {
+            "message": "No GPS records match these filters.",
+            "count": 0,
+        }
+
+    # Center the map on the collected GPS points.
+    points = [
+        (row["latitude"], row["longitude"])
+        for row in rows
+    ]
+
+    center = [
+        sum(p[0] for p in points) / len(points),
+        sum(p[1] for p in points) / len(points),
+    ]
+
+    m = folium.Map(location=center, zoom_start=15)
+
+    colors = {
+        "dense": "red",
+        "medium": "orange",
+        "sparse": "green",
+        "unknown": "gray",
+    }
+
+    # Create a separate heatmap layer for each forest type.
+    for kind, color in colors.items():
+        matching = [
+            row for row in rows
+            if row["density"] == kind
+        ]
+
+        if not matching:
+            continue
+
+        layer = folium.FeatureGroup(
+            name=f"{kind.title()} forest ({len(matching)} records)",
+            show=True,
+        )
+
+        # Heatmap intensity is weighted by classification confidence.
+        heat_data = [
+            [
+                row["latitude"],
+                row["longitude"],
+                max(0.1, row["confidence"] or 0.5),
+            ]
+            for row in matching
+        ]
+
+        HeatMap(
+            heat_data,
+            radius=25,
+            blur=18,
+            min_opacity=0.3,
+            gradient={
+                0.2: "blue",
+                0.5: "lime",
+                0.8: "yellow",
+                1.0: color,
+            },
+        ).add_to(layer)
+
+        # Show individual records and their timestamps on click.
+        for row in matching:
+            timestamp = row["recorded_at"] or row["received_at"]
+            popup = folium.Popup(
+                f"""
+                <b>Forest type:</b> {row['density']}<br>
+                <b>Confidence:</b> {row['confidence']}<br>
+                <b>Timestamp:</b> {timestamp}<br>
+                <b>Device:</b> {row['device_id']}<br>
+                <b>Latitude:</b> {row['latitude']}<br>
+                <b>Longitude:</b> {row['longitude']}<br>
+                <b>Telemetry:</b> {row['telemetry'] or 'N/A'}
+                """,
+                max_width=350,
+            )
+
+            folium.CircleMarker(
+                location=[row["latitude"], row["longitude"]],
+                radius=4,
+                color=color,
+                fill=True,
+                fill_opacity=0.85,
+                popup=popup,
+                tooltip=f"{kind.title()} - {timestamp}",
+            ).add_to(layer)
+
+        layer.add_to(m)
+
+    folium.LayerControl(collapsed=False).add_to(m)
+
+    # Return a standalone HTML map.
+    output_file = "forest_heatmap.html"
+    m.save(output_file)
+
+    # return FileResponse(
+    #     output_file,
+    #     media_type="text/html",
+    #     filename="forest_heatmap.html",
+    # )
+    return HTMLResponse(
+        content=m.get_root().render(), 
+        # media_type="text/html"
+    )
