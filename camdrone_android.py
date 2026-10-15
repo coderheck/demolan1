@@ -10,6 +10,8 @@ import easyocr
 import csv
 from datetime import datetime
 import os
+import serial
+import threading
 
 # ============================================================
 # SCRCPY
@@ -96,6 +98,103 @@ telemetry = "NO DATA"
 # Fake GPS for now
 lat = 10.7623
 lon = 106.6821
+
+
+# ============================================================
+# REAL GPS
+# ============================================================
+
+GPS_PORT = "COM12"  # Change this to your board's COM port
+GPS_BAUD = 115200
+
+lat = None
+lon = None
+gps_status = "NO GPS FIX"
+
+
+def nmea_to_decimal(value, direction):
+    """Convert ddmm.mmmm / dddmm.mmmm to decimal degrees."""
+
+    if not value or not direction:
+        return None
+
+    try:
+        value = float(value)
+        degrees = int(value // 100)
+        minutes = value - degrees * 100
+        decimal = degrees + minutes / 60
+
+        if direction in ("S", "W"):
+            decimal = -decimal
+
+        return decimal
+
+    except (ValueError, TypeError):
+        return None
+
+
+def read_gps():
+    global lat, lon, gps_status
+
+    try:
+        gps = serial.Serial(
+            GPS_PORT,
+            GPS_BAUD,
+            timeout=1
+        )
+
+        gps_status = "GPS CONNECTED"
+
+        while True:
+            line = gps.readline().decode(
+                "ascii",
+                errors="ignore"
+            ).strip()
+
+            if not line.startswith("LOC,"):
+                continue
+
+            # Example:
+            # LOC,091644.00,1051.1155N,10647.0237E,...
+
+            fields = line.split(",")
+
+            if len(fields) < 4:
+                continue
+
+            latitude = fields[2].strip()
+            longitude = fields[3].strip()
+
+            if not latitude or not longitude:
+                continue
+
+            lat_dir = latitude[-1]
+            lon_dir = longitude[-1]
+
+            new_lat = nmea_to_decimal(
+                latitude[:-1],
+                lat_dir
+            )
+
+            new_lon = nmea_to_decimal(
+                longitude[:-1],
+                lon_dir
+            )
+
+            if new_lat is not None and new_lon is not None:
+                lat = new_lat
+                lon = new_lon
+                gps_status = "GPS FIX"
+
+    except Exception as e:
+        gps_status = f"GPS ERROR: {e}"
+        print(gps_status)
+
+
+threading.Thread(
+    target=read_gps,
+    daemon=True
+).start()
 
 
 # ============================================================
@@ -506,9 +605,13 @@ with mss.MSS() as sct:
         if frame_count % 60 == 0:
             with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                writer.writerow(
-                    [datetime.now(), lat, lon, forest_class, round(conf, 3), telemetry]
-                )
+                writer.writerow([
+                    datetime.now().isoformat(timespec="seconds"), 
+                    lat, lon, 
+                    forest_class, 
+                    round(conf, 3), 
+                    telemetry
+                ])
 
         # ====================================================
         # DRAW OCR CROP RECTANGLE
@@ -549,6 +652,16 @@ with mss.MSS() as sct:
             0.7,
             (0, 255, 255),
             2,
+        )
+
+        cv2.putText(
+            display_frame,
+            f"GPS: {gps_status}",
+            (20, 115),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 0),
+            2
         )
 
         # ====================================================

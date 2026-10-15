@@ -4,3 +4,5 @@ easyocr
 mss 
 pygetwindow 
 pillow 
+pyserial
+fastapi
