@@ -6,6 +6,7 @@ import time
 import socket
 import csv
 import os
+import requests
 from datetime import datetime
 from ultralytics import YOLO
 
@@ -72,12 +73,16 @@ class ThreadedRTMPStream:
 LOCAL_IP = get_local_ip()
 RTMP_URL = "rtmp://localhost:1935/live/drone"
 
+LOCAL_API_URL = "http://127.0.0.1:8000/api/annotate-latest"
+API_KEY = "forest"
+DEVICE_ID = "TDM2421-01"
+
 print("=" * 60)
-print(f"1. In DJI Fly, set RTMP URL to:")
-print(f"   rtmp://{LOCAL_IP}:1935/live/drone")
-print(f"2. make sure mediamtx is already running")
-print(f"3. run this script")
-print(f"4. W forest gaming")
+print(f"1.  make sure mediamtx is already running")
+print(f"2.  in DJI Fly, set RTMP URL to:")
+print(f"        rtmp://{LOCAL_IP}:1935/live/drone")
+print(f"3.  run this script")
+print(f"4.  W forest gaming")
 print("=" * 60)
 
 # Load YOLO Model
@@ -135,12 +140,45 @@ while True:
     # YOLO Inference (Every 10 frames)
     if frame_count % 10 == 0:
         try:
+            # set displayed forest type
             small_frame = cv2.resize(frame, (224, 224))
             results = model(small_frame, verbose=False)
             probs = results[0].probs
             class_id = probs.top1
             conf = float(probs.top1conf)
             forest_class = model.names[class_id]
+
+            # Send the latest forest classification to the local API.
+            try:
+                # Normalize model labels to the categories accepted by server.py.
+                label = str(forest_class).strip().lower()
+
+                aliases = {
+                    "dense": "dense",
+                    "medium": "medium",
+                    "sparse": "sparse",
+                    "unknown": "unknown",
+                }
+
+                density = aliases.get(label, "unknown")
+
+                response = requests.post(
+                    LOCAL_API_URL,
+                    params={
+                        "device_id": DEVICE_ID,
+                        "density": density,
+                        "confidence": conf,
+                        "telemetry": telemetry_data,
+                    },
+                    headers={"X-API-Key": API_KEY},
+                    timeout=3,
+                )
+
+                if response.status_code != 200:
+                    print("Classification upload failed:", response.text)
+
+            except requests.RequestException as e:
+                print("Classification API error:", e)
         except Exception as e:
             print("YOLO Inference Error:", e)
 

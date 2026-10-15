@@ -125,7 +125,7 @@ def list_records(
 
     return [dict(row) for row in rows]
 
-@app.post("/api/annotate-latest")
+@app.post("/api/annotate-latest", status_code=201)
 def annotate_latest(
     device_id: str,
     density: str,
@@ -141,22 +141,32 @@ def annotate_latest(
     if not 0 <= confidence <= 1:
         raise HTTPException(status_code=400, detail="Invalid confidence")
 
+    now = datetime.now(timezone.utc).isoformat()
+
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.execute("""
-            UPDATE records
-            SET density = ?, confidence = ?, telemetry = ?
-            WHERE id = (
-                SELECT id FROM records
-                WHERE device_id = ?
-                ORDER BY id DESC
-                LIMIT 1
+            INSERT INTO records (
+                received_at, device_id, recorded_at,
+                latitude, longitude, density, confidence, telemetry
             )
-        """, (density, confidence, telemetry, device_id))
+            SELECT ?, device_id, ?, latitude, longitude, ?, ?, ?
+            FROM records
+            WHERE device_id = ?
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            ORDER BY id DESC
+            LIMIT 1
+        """, (
+            now, now, density, confidence, telemetry, device_id
+        ))
 
         if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="No GPS record found")
+            raise HTTPException(
+                status_code=404,
+                detail="No GPS record found for this device",
+            )
 
-    return {"status": "annotated"}
+    return {"status": "stored"}
 
 @app.get("/heatmap")
 def forest_heatmap(
