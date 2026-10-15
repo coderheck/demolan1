@@ -174,8 +174,8 @@ while True:
                     timeout=3,
                 )
 
-                if response.status_code != 200:
-                    print("Classification upload failed:", response.text)
+                if response.status_code != 200 or response.status_code != 201:
+                    print(f"Classification upload failed ({response.status_code}), got response: ", response.text)
 
             except requests.RequestException as e:
                 print("Classification API error:", e)
