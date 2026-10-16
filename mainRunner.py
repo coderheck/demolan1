@@ -88,28 +88,6 @@ print("=" * 60)
 # Load YOLO Model
 model = YOLO(r"./runs/classify/train/weights/best.pt")
 
-# OCR Setup in Background Thread
-ocr_queue = queue.Queue(maxsize=1)
-telemetry_data = "NO DATA"
-
-def ocr_worker():
-    global telemetry_data
-    reader = easyocr.Reader(['en'], gpu=False)
-    while True:
-        crop = ocr_queue.get()
-        if crop is None:
-            break
-        try:
-            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-            _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
-            texts = reader.readtext(thresh, detail=0)
-            telemetry_data = " ".join(texts) if texts else "NO TEXT"
-        except Exception:
-            telemetry_data = "OCR ERROR"
-        ocr_queue.task_done()
-
-threading.Thread(target=ocr_worker, daemon=True).start()
-
 # CSV Logging Initialization
 CSV_FILE = "forest_log.csv"
 if not os.path.exists(CSV_FILE):
@@ -165,16 +143,14 @@ while True:
                 response = requests.post(
                     LOCAL_API_URL,
                     params={
-                        "device_id": DEVICE_ID,
                         "density": density,
                         "confidence": conf,
-                        "telemetry": telemetry_data,
                     },
                     headers={"X-API-Key": API_KEY},
                     timeout=3,
                 )
 
-                if response.status_code != 200 or response.status_code != 201:
+                if response.status_code not in (200, 201):
                     print(f"Classification upload failed ({response.status_code}), got response: ", response.text)
 
             except requests.RequestException as e:
@@ -182,17 +158,11 @@ while True:
         except Exception as e:
             print("YOLO Inference Error:", e)
 
-    # Async OCR (Every 30 frames)
-    if frame_count % 30 == 0 and ocr_queue.empty():
-        crop = frame[430:470, 250:600]
-        if crop.size != 0:
-            ocr_queue.put(crop.copy())
-
     # Log to CSV (Every 60 frames)
     if frame_count % 60 == 0:
         with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow([datetime.now(), forest_class, round(conf, 3), telemetry_data])
+            writer.writerow([datetime.now(), forest_class, round(conf, 3)])
 
     # Overlay HUD
     cv2.rectangle(frame, (10, 10), (900, 120), (0, 0, 0), -1)
@@ -203,15 +173,6 @@ while True:
         cv2.FONT_HERSHEY_SIMPLEX,
         0.9,
         (0, 255, 0),
-        2
-    )
-    cv2.putText(
-        frame,
-        f"Telemetry: {telemetry_data}",
-        (20, 90),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (0, 255, 255),
         2
     )
 

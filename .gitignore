@@ -226,3 +226,5 @@ runs/classify/train/*.png
 mediamtx
 forest_heatmap.html
 forest.db
+*.csv
+*.db
