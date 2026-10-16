@@ -152,6 +152,7 @@ while True:
                 )
 
                 print(f"uploaded #{send_count}")
+                send_count += 1
 
                 # if response.status_code not in (200, 201):
                 #     print(f"Classification upload failed ({response.status_code}), got response: ", response.text)

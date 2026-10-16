@@ -10,6 +10,8 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+import math
+
 DB_FILE = "forest.db"
 API_KEY = os.environ.get("FOREST_API_KEY")
 
@@ -238,33 +240,75 @@ def list_records(
     return [dict(row) for row in rows]
 
 
+
+# Forest density score for each YOLO class.
+DENSITY_SCORES = {
+    "sparse": 0,
+    "medium": 50,
+    "dense": 100,
+}
+
+# Web Mercator projection, in meters.
+EARTH_RADIUS = 6378137.0
+
+
+def project_coordinates(latitude, longitude):
+    latitude = max(-85.05112878, min(85.05112878, latitude))
+
+    x = EARTH_RADIUS * math.radians(longitude)
+    y = EARTH_RADIUS * math.log(
+        math.tan(math.pi / 4 + math.radians(latitude) / 2)
+    )
+
+    return x, y
+
+
+def unproject_coordinates(x, y):
+    longitude = math.degrees(x / EARTH_RADIUS)
+    latitude = math.degrees(
+        2 * math.atan(math.exp(y / EARTH_RADIUS)) - math.pi / 2
+    )
+
+    return latitude, longitude
+
+
+def score_color(score):
+    """Green = sparse, yellow = medium, red = dense."""
+    if score <= 50:
+        ratio = score / 50
+        start = (44, 162, 95)       # Green
+        end = (255, 255, 191)       # Yellow
+    else:
+        ratio = (score - 50) / 50
+        start = (255, 255, 191)     # Yellow
+        end = (215, 25, 28)         # Red
+
+    rgb = tuple(
+        round(a + (b - a) * ratio)
+        for a, b in zip(start, end)
+    )
+
+    return "#{:02x}{:02x}{:02x}".format(*rgb)
+
+
 @app.get("/heatmap", response_class=HTMLResponse)
 def forest_heatmap(
-    forest_type: str = "all",
+    cell_size: float = Query(default=20, ge=5, le=200),
+    fill_gaps: bool = True,
+    smoothing_radius: int = Query(default=1, ge=0, le=3),
     start: str | None = None,
     end: str | None = None,
 ):
-    allowed_types = {"dense", "medium", "sparse", "unknown", "all"}
-
-    if forest_type not in allowed_types:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid forest_type",
-        )
-
+    # Only classes with a defined numerical density score contribute.
     query = """
-        SELECT id, received_at, recorded_at,
-               latitude, longitude, density, confidence
+        SELECT latitude, longitude, density, confidence,
+               recorded_at, received_at
         FROM records
         WHERE latitude IS NOT NULL
           AND longitude IS NOT NULL
-          AND density IS NOT NULL
+          AND density IN ('sparse', 'medium', 'dense')
     """
     params = []
-
-    if forest_type != "all":
-        query += " AND density = ?"
-        params.append(forest_type)
 
     if start:
         query += " AND COALESCE(recorded_at, received_at) >= ?"
@@ -274,86 +318,172 @@ def forest_heatmap(
         query += " AND COALESCE(recorded_at, received_at) <= ?"
         params.append(end)
 
-    query += " ORDER BY id ASC"
-
     with sqlite3.connect(DB_FILE) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(query, params).fetchall()
 
     if not rows:
         return HTMLResponse(
-            "<h2>No classified GPS observations match these filters.</h2>"
+            "<h2>No scored forest observations match these filters.</h2>"
         )
 
+    # Aggregate observations into fixed-size projected grid cells.
+    cells = {}
+
+    for row in rows:
+        x, y = project_coordinates(row["latitude"], row["longitude"])
+
+        ix = math.floor(x / cell_size)
+        iy = math.floor(y / cell_size)
+        key = (ix, iy)
+
+        score = DENSITY_SCORES[row["density"]]
+        confidence = row["confidence"]
+
+        # Avoid a zero weight when confidence is zero or missing.
+        weight = max(0.05, confidence if confidence is not None else 0.5)
+
+        if key not in cells:
+            cells[key] = {
+                "weighted_score": 0.0,
+                "total_weight": 0.0,
+                "count": 0,
+            }
+
+        cells[key]["weighted_score"] += score * weight
+        cells[key]["total_weight"] += weight
+        cells[key]["count"] += 1
+
+    for cell in cells.values():
+        cell["score"] = (
+            cell["weighted_score"] / cell["total_weight"]
+        )
+
+    # Estimate only unobserved cells near measured cells.
+    # Observed cells are never overwritten by estimates.
+    estimated = {}
+
+    if fill_gaps and smoothing_radius > 0:
+        for ix, iy in cells:
+            for dx in range(-smoothing_radius, smoothing_radius + 1):
+                for dy in range(-smoothing_radius, smoothing_radius + 1):
+                    if dx == 0 and dy == 0:
+                        continue
+
+                    target = (ix + dx, iy + dy)
+
+                    if target in cells:
+                        continue
+
+                    distance_squared = dx * dx + dy * dy
+                    if distance_squared > smoothing_radius * smoothing_radius:
+                        continue
+
+                    source = cells[(ix, iy)]
+                    weight = source["total_weight"] / distance_squared
+
+                    if target not in estimated:
+                        estimated[target] = {
+                            "weighted_score": 0.0,
+                            "total_weight": 0.0,
+                        }
+
+                    estimated[target]["weighted_score"] += (
+                        source["score"] * weight
+                    )
+                    estimated[target]["total_weight"] += weight
+
+        for cell in estimated.values():
+            cell["score"] = (
+                cell["weighted_score"] / cell["total_weight"]
+            )
+
+    # Center the map on actual observations, not estimated cells.
     center = [
         sum(row["latitude"] for row in rows) / len(rows),
         sum(row["longitude"] for row in rows) / len(rows),
     ]
 
-    m = folium.Map(location=center, zoom_start=15)
+    m = folium.Map(location=center, zoom_start=17)
 
-    colors = {
-        "dense": "red",
-        "medium": "orange",
-        "sparse": "green",
-        "unknown": "gray",
-    }
+    layer = folium.FeatureGroup(
+        name=f"Forest density grid ({cell_size:g} m cells)"
+    )
 
-    for kind, color in colors.items():
-        matching = [
-            row for row in rows
-            if row["density"] == kind
-        ]
-
-        if not matching:
-            continue
-
-        layer = folium.FeatureGroup(
-            name=f"{kind.title()} forest ({len(matching)} records)"
+    # Draw measured cells.
+    for (ix, iy), cell in cells.items():
+        south, west = unproject_coordinates(
+            ix * cell_size, iy * cell_size
+        )
+        north, east = unproject_coordinates(
+            (ix + 1) * cell_size, (iy + 1) * cell_size
         )
 
-        heat_data = [
-            [
-                row["latitude"],
-                row["longitude"],
-                max(0.1, row["confidence"] or 0.5),
-            ]
-            for row in matching
-        ]
+        color = score_color(cell["score"])
 
-        HeatMap(
-            heat_data,
-            radius=25,
-            blur=18,
-            min_opacity=0.3,
+        folium.Rectangle(
+            bounds=[[south, west], [north, east]],
+            color=color,
+            weight=1,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.70,
+            tooltip=(
+                f"Measured cell | Score: {cell['score']:.1f}/100"
+                f" | Observations: {cell['count']}"
+            ),
+            popup=(
+                f"Status: Measured<br>"
+                f"Density score: {cell['score']:.1f}/100<br>"
+                f"Observations: {cell['count']}<br>"
+                f"Grid size: {cell_size:g} m"
+            ),
         ).add_to(layer)
 
-        for row in matching:
-            timestamp = row["recorded_at"] or row["received_at"]
+    # Draw estimated cells with lower opacity so they are distinguishable.
+    for (ix, iy), cell in estimated.items():
+        south, west = unproject_coordinates(
+            ix * cell_size, iy * cell_size
+        )
+        north, east = unproject_coordinates(
+            (ix + 1) * cell_size, (iy + 1) * cell_size
+        )
 
-            popup = folium.Popup(
-                f"""
-                <b>Forest type:</b> {row['density']}<br>
-                <b>Confidence:</b> {row['confidence']}<br>
-                <b>Timestamp:</b> {timestamp}<br>
-                <b>Latitude:</b> {row['latitude']}<br>
-                <b>Longitude:</b> {row['longitude']}
-                """,
-                max_width=350,
-            )
+        color = score_color(cell["score"])
 
-            folium.CircleMarker(
-                location=[row["latitude"], row["longitude"]],
-                radius=4,
-                color=color,
-                fill=True,
-                fill_opacity=0.85,
-                popup=popup,
-                tooltip=f"{kind.title()} - {timestamp}",
-            ).add_to(layer)
+        folium.Rectangle(
+            bounds=[[south, west], [north, east]],
+            color=color,
+            weight=1,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.25,
+            dash_array="4",
+            tooltip=f"Estimated cell | Score: {cell['score']:.1f}/100",
+            popup=(
+                f"Status: Estimated from nearby measured cells<br>"
+                f"Estimated density score: {cell['score']:.1f}/100<br>"
+                f"Grid size: {cell_size:g} m"
+            ),
+        ).add_to(layer)
 
-        layer.add_to(m)
-
+    layer.add_to(m)
     folium.LayerControl(collapsed=False).add_to(m)
+
+    legend = """
+    <div style="
+        position: fixed; bottom: 25px; left: 25px; z-index: 9999;
+        background: white; padding: 10px 14px; border: 1px solid #888;
+        border-radius: 5px; font-size: 13px;">
+        <b>Forest density score</b><br>
+        <span style="color:#2ca25f">■</span> 0 — Sparse<br>
+        <span style="color:#ffffbf">■</span> 50 — Medium<br>
+        <span style="color:#d7191c">■</span> 100 — Dense<br>
+        Solid cells: observed<br>
+        Transparent dashed cells: estimated
+    </div>
+    """
+
+    m.get_root().html.add_child(folium.Element(legend))
 
     return HTMLResponse(content=m.get_root().render())
