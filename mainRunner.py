@@ -104,6 +104,7 @@ stream = ThreadedRTMPStream(RTMP_URL)
 frame_count = 0
 forest_class = "waiting..."
 conf = 0.0
+send_count = 1
 
 while True:
     ret, frame = stream.read()
@@ -150,8 +151,10 @@ while True:
                     timeout=3,
                 )
 
-                if response.status_code not in (200, 201):
-                    print(f"Classification upload failed ({response.status_code}), got response: ", response.text)
+                print(f"uploaded #{send_count}")
+
+                # if response.status_code not in (200, 201):
+                #     print(f"Classification upload failed ({response.status_code}), got response: ", response.text)
 
             except requests.RequestException as e:
                 print("Classification API error:", e)
@@ -159,7 +162,7 @@ while True:
             print("YOLO Inference Error:", e)
 
     # Log to CSV (Every 60 frames)
-    if frame_count % 60 == 0:
+    if frame_count % 30 == 0:
         with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow([datetime.now(), forest_class, round(conf, 3)])
