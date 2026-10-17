@@ -293,7 +293,7 @@ def score_color(score):
 
 @app.get("/heatmap", response_class=HTMLResponse)
 def forest_heatmap(
-    cell_size: float = Query(default=20, ge=5, le=200),
+    cell_size: float = Query(default=20, ge=5, le=200), # min cạnh 5m (25m^2), max 200m (40000m^2 = 4ha)
     fill_gaps: bool = True,
     smoothing_radius: int = Query(default=1, ge=0, le=3),
     start: str | None = None,

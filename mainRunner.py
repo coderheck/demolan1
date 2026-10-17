@@ -26,45 +26,116 @@ def get_local_ip():
 
 
 # =========================
-# THREADED RTMP FRAME GRABBER
+# RTMP STREAM WITH AUTO-RECONNECT
 # =========================
 class ThreadedRTMPStream:
-    """Continuously pulls frames from the RTMP server, dropping stale frames
+    """Continuously reads RTMP frames and reconnects after failures."""
 
-    to guarantee zero latency accumulation.
-    """
-    def __init__(self, stream_url):
-        # Force FFmpeg low-latency flags for OpenCV
+    def __init__(self, stream_url, retry_delay=3, max_read_failures=30):
+        self.stream_url = stream_url
+        self.retry_delay = retry_delay
+        self.max_read_failures = max_read_failures
+
+        # Configure FFmpeg for low-latency RTMP.
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
             "fflags;nobuffer|flags;low_delay|analyzeduration;0|probesize;32"
         )
-        self.cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        self.cap = None
         self.ret = False
         self.frame = None
         self.running = True
-        
+        self.lock = threading.Lock()
+
         self.thread = threading.Thread(target=self._update, daemon=True)
         self.thread.start()
 
-    def _update(self):
+    def _connect(self):
+        """Keep retrying until the RTMP stream becomes available."""
         while self.running:
-            ret, frame = self.cap.read()
-            if ret:
-                self.ret = ret
-                self.frame = frame
+            print(f"[RTMP] Connecting to {self.stream_url} ...")
+
+            cap = cv2.VideoCapture(self.stream_url, cv2.CAP_FFMPEG)
+
+            if cap.isOpened():
+                with self.lock:
+                    self.cap = cap
+                    self.ret = False
+                    self.frame = None
+
+                print("[RTMP] Connected successfully.")
+                return True
+
+            cap.release()
+            print(f"[RTMP] Connection failed. Retrying in {self.retry_delay}s...")
+            time.sleep(self.retry_delay)
+
+        return False
+
+    def _update(self):
+        failed_reads = 0
+
+        while self.running:
+            with self.lock:
+                cap = self.cap
+
+            if cap is None:
+                if not self._connect():
+                    break
+                failed_reads = 0
+                continue
+
+            ret, frame = cap.read()
+
+            if ret and frame is not None:
+                with self.lock:
+                    self.ret = True
+                    self.frame = frame
+                failed_reads = 0
             else:
-                time.sleep(0.01)
+                failed_reads += 1
+
+                if failed_reads >= self.max_read_failures:
+                    print("[RTMP] Stream lost. Reconnecting...")
+
+                    with self.lock:
+                        old_cap = self.cap
+                        self.cap = None
+                        self.ret = False
+                        self.frame = None
+
+                    if old_cap is not None:
+                        old_cap.release()
+
+                    failed_reads = 0
+                    time.sleep(self.retry_delay)
+                else:
+                    time.sleep(0.05)
 
     def read(self):
-        return self.ret, self.frame
+        with self.lock:
+            return self.ret, self.frame
 
     def is_opened(self):
-        return self.cap.isOpened()
+        with self.lock:
+            return self.cap is not None and self.cap.isOpened()
 
     def release(self):
         self.running = False
-        self.cap.release()
+
+        with self.lock:
+            cap = self.cap
+            self.cap = None
+            self.ret = False
+            self.frame = None
+
+        if cap is not None:
+            cap.release()
+
+        if self.thread.is_alive():
+            self.thread.join(timeout=2)
+
+        print("[RTMP] Stream reader stopped.")
 
 
 # =========================
