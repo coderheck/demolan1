@@ -273,15 +273,15 @@ def unproject_coordinates(x, y):
 
 
 def score_color(score):
-    """Green = sparse, yellow = medium, red = dense."""
+    """Green = dense, yellow = medium, red = sparse."""
     if score <= 50:
         ratio = score / 50
-        start = (44, 162, 95)       # Green
-        end = (255, 255, 191)       # Yellow
+        start = (215, 25, 28)       # Red: sparse
+        end = (255, 255, 191)       # Yellow: medium
     else:
         ratio = (score - 50) / 50
-        start = (255, 255, 191)     # Yellow
-        end = (215, 25, 28)         # Red
+        start = (255, 255, 191)     # Yellow: medium
+        end = (44, 162, 95)          # Green: dense
 
     rgb = tuple(
         round(a + (b - a) * ratio)
@@ -475,12 +475,12 @@ def forest_heatmap(
         position: fixed; bottom: 25px; left: 25px; z-index: 9999;
         background: white; padding: 10px 14px; border: 1px solid #888;
         border-radius: 5px; font-size: 13px;">
-        <b>Forest density score</b><br>
-        <span style="color:#2ca25f">■</span> 0 — Sparse<br>
-        <span style="color:#ffffbf">■</span> 50 — Medium<br>
-        <span style="color:#d7191c">■</span> 100 — Dense<br>
-        Solid cells: observed<br>
-        Transparent dashed cells: estimated
+        <b>Forest density score / Độ phủ rừng</b><br>
+        <span style="color:#d7191c">■</span> --0 - Sparse / Thưa<br>
+        <span style="color:#ffffbf">■</span> -50 - Medium / Vừa<br>
+        <span style="color:#2ca25f">■</span> 100 - Dense / Dày<br>
+        Solid cells: observed / Ô nét liền: đã đo<br>
+        Transparent dashed cells: estimated / Ô nét đứt: ước tính từ các ô xung quanh
     </div>
     """
 
